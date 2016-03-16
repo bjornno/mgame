@@ -1,204 +1,220 @@
+// mods by Patrick OReilly
+// Twitter: @pato_reilly Web: http://patricko.byethost9.com
 
-var game = new Phaser.Game(800, 600, Phaser.AUTO, 'phaser-example', { preload: preload, create: create, update: update });
+var game = new Phaser.Game(800, 600, Phaser.CANVAS, 'phaser-example', { preload: preload, create: create, update: update, render: render });
 
 function preload() {
 
-    game.load.atlas('breakout', '/assets/games/breakout/breakout.png', 'assets/games/breakout/breakout.json');
-    game.load.image('starfield', '/assets/misc/starfield.jpg');
-
+    game.load.spritesheet('item', 'assets/buttons/number-buttons.png', 160, 160);
 }
 
-var ball;
-var paddle;
-var bricks;
-
-var ballOnPaddle = true;
-
-var lives = 3;
-var score = 0;
-
-var scoreText;
-var livesText;
-var introText;
-
-var s;
+var simon;
+var N = 1;
+var userCount = 0;
+var currentCount = 0;
+var sequenceCount = 16;
+var sequenceList = [];
+var simonSez = false;
+var timeCheck;
+var litSquare;
+var winner;
+var loser;
+var intro;
 
 function create() {
 
-    game.physics.startSystem(Phaser.Physics.ARCADE);
+    simon = game.add.group();
+    var item;
 
-    //  We check bounds collisions against all walls other than the bottom one
-    game.physics.arcade.checkCollision.down = false;
-
-    s = game.add.tileSprite(0, 0, 800, 600, 'starfield');
-
-    bricks = game.add.group();
-    bricks.enableBody = true;
-    bricks.physicsBodyType = Phaser.Physics.ARCADE;
-
-    var brick;
-
-    for (var y = 0; y < 4; y++)
+    for (var i = 0; i < 3; i++)
     {
-        for (var x = 0; x < 15; x++)
+        item = simon.create(150 + 168 * i, 150, 'item', i);
+        // Enable input.
+        item.inputEnabled = true;
+        item.input.start(0, true);
+        item.events.onInputDown.add(select);
+        item.events.onInputUp.add(release);
+        item.events.onInputOut.add(moveOff);
+        simon.getAt(i).alpha = 0;
+    }
+
+    for (var i = 0; i < 3; i++)
+    {
+        item = simon.create(150 + 168 * i, 318, 'item', i + 3);
+        // Enable input.
+        item.inputEnabled = true;
+        item.input.start(0, true);
+        item.events.onInputDown.add(select);
+        item.events.onInputUp.add(release);
+        item.events.onInputOut.add(moveOff);
+        simon.getAt(i + 3).alpha = 0;
+    }
+
+    introTween();
+    setUp();
+    setTimeout(function(){simonSequence(); intro = false;}, 6000);
+
+}
+
+function restart() {
+
+    N = 1;
+    userCount = 0;
+    currentCount = 0;
+    sequenceList = [];
+    winner = false;
+    loser = false;
+    introTween();
+    setUp();
+    setTimeout(function(){simonSequence(); intro=false;}, 6000);
+
+}
+
+function introTween() {
+
+    intro = true;
+
+    for (var i = 0; i < 6; i++)
+    {
+        var flashing = game.add.tween(simon.getAt(i)).to( { alpha: 1 }, 500, Phaser.Easing.Linear.None, true, 0, 4, true);
+        var final = game.add.tween(simon.getAt(i)).to( { alpha: .25 }, 500, Phaser.Easing.Linear.None, true);
+
+        flashing.chain(final);
+        flashing.start();
+    }
+
+}
+
+function update() {
+
+    if (simonSez)
+    {
+        if (game.time.now - timeCheck >700-N*40)
         {
-            brick = bricks.create(120 + (x * 36), 100 + (y * 52), 'breakout', 'brick_' + (y+1) + '_1.png');
-            brick.body.bounce.set(1);
-            brick.body.immovable = true;
+            simon.getAt(litSquare).alpha = .25;
+            game.paused = true;
+
+            setTimeout(function()
+            {
+                if ( currentCount< N)
+                {
+                    game.paused = false;
+                    simonSequence();
+                }
+                else
+                {
+                    simonSez = false;
+                    game.paused = false;
+                }
+            }, 400 - N * 20);
         }
     }
-
-    paddle = game.add.sprite(game.world.centerX, 500, 'breakout', 'paddle_big.png');
-    paddle.anchor.setTo(0.5, 0.5);
-
-    game.physics.enable(paddle, Phaser.Physics.ARCADE);
-
-    paddle.body.collideWorldBounds = true;
-    paddle.body.bounce.set(1);
-    paddle.body.immovable = true;
-
-    ball = game.add.sprite(game.world.centerX, paddle.y - 16, 'breakout', 'ball_1.png');
-    ball.anchor.set(0.5);
-    ball.checkWorldBounds = true;
-
-    game.physics.enable(ball, Phaser.Physics.ARCADE);
-
-    ball.body.collideWorldBounds = true;
-    ball.body.bounce.set(1);
-
-    ball.animations.add('spin', [ 'ball_1.png', 'ball_2.png', 'ball_3.png', 'ball_4.png', 'ball_5.png' ], 50, true, false);
-
-    ball.events.onOutOfBounds.add(ballLost, this);
-
-    scoreText = game.add.text(32, 550, 'score: 0', { font: "20px Arial", fill: "#ffffff", align: "left" });
-    livesText = game.add.text(680, 550, 'lives: 3', { font: "20px Arial", fill: "#ffffff", align: "left" });
-    introText = game.add.text(game.world.centerX, 400, '- click to start -', { font: "40px Arial", fill: "#ffffff", align: "center" });
-    introText.anchor.setTo(0.5, 0.5);
-
-    game.input.onDown.add(releaseBall, this);
-
 }
 
-function update () {
+function playerSequence(selected) {
 
-    //  Fun, but a little sea-sick inducing :) Uncomment if you like!
-    // s.tilePosition.x += (game.input.speed.x / 2);
+    correctSquare = sequenceList[userCount];
+    userCount++;
+    thisSquare = simon.getIndex(selected);
 
-    paddle.x = game.input.x;
-
-    if (paddle.x < 24)
+    if (thisSquare == correctSquare)
     {
-        paddle.x = 24;
-    }
-    else if (paddle.x > game.width - 24)
-    {
-        paddle.x = game.width - 24;
-    }
-
-    if (ballOnPaddle)
-    {
-        ball.body.x = paddle.x;
+        if (userCount == N)
+        {
+            if (N == sequenceCount)
+            {
+                winner = true;
+                setTimeout(function(){restart();}, 3000);
+            }
+            else
+            {
+                userCount = 0;
+                currentCount = 0;
+                N++;
+                simonSez = true;
+            }
+        }
     }
     else
     {
-        game.physics.arcade.collide(ball, paddle, ballHitPaddle, null, this);
-        game.physics.arcade.collide(ball, bricks, ballHitBrick, null, this);
+        loser = true;
+        setTimeout(function(){restart();}, 3000);
     }
 
 }
 
-function releaseBall () {
+function simonSequence () {
 
-    if (ballOnPaddle)
+    simonSez = true;
+    litSquare = sequenceList[currentCount];
+    simon.getAt(litSquare).alpha = 1;
+    timeCheck = game.time.now;
+    currentCount++;
+
+}
+
+function setUp() {
+
+    for (var i = 0; i < sequenceCount; i++)
     {
-        ballOnPaddle = false;
-        ball.body.velocity.y = -300;
-        ball.body.velocity.x = -75;
-        ball.animations.play('spin');
-        introText.visible = false;
+        thisSquare = game.rnd.integerInRange(0,5);
+        sequenceList.push(thisSquare);
     }
 
 }
 
-function ballLost () {
+function select(item, pointer) {
 
-    lives--;
-    livesText.text = 'lives: ' + lives;
-
-    if (lives === 0)
+    if (!simonSez && !intro && !loser && !winner)
     {
-        gameOver();
+        item.alpha = 1;
+    }
+
+}
+
+function release(item, pointer) {
+
+    if (!simonSez && !intro && !loser && !winner)
+    {
+        item.alpha = .25;
+        playerSequence(item);
+    }
+}
+
+function moveOff(item, pointer) {
+
+    if (!simonSez && !intro && !loser && !winner)
+    {
+        item.alpha = .25;
+    }
+
+}
+
+function render() {
+
+    if (!intro)
+    {
+        if (simonSez)
+        {
+            game.debug.text('Simon Sez', 360, 96, 'rgb(255,0,0)');
+        }
+        else
+        {
+            game.debug.text('Your Turn', 360, 96, 'rgb(0,255,0)');
+        }
     }
     else
     {
-        ballOnPaddle = true;
-
-        ball.reset(paddle.body.x + 16, paddle.y - 16);
-
-        ball.animations.stop();
+        game.debug.text('Get Ready', 360, 96, 'rgb(0,0,255)');
     }
 
-}
-
-function gameOver () {
-
-    ball.body.velocity.setTo(0, 0);
-
-    introText.text = 'Game Over!';
-    introText.visible = true;
-
-}
-
-function ballHitBrick (_ball, _brick) {
-
-    _brick.kill();
-
-    score += 10;
-
-    scoreText.text = 'score: ' + score;
-
-    //  Are they any bricks left?
-    if (bricks.countLiving() == 0)
+    if (winner)
     {
-        //  New level starts
-        score += 1000;
-        scoreText.text = 'score: ' + score;
-        introText.text = '- Next Level -';
-
-        //  Let's move the ball back to the paddle
-        ballOnPaddle = true;
-        ball.body.velocity.set(0);
-        ball.x = paddle.x + 16;
-        ball.y = paddle.y - 16;
-        ball.animations.stop();
-
-        //  And bring the bricks back from the dead :)
-        bricks.callAll('revive');
+        game.debug.text('You Win!', 360, 32, 'rgb(0,0,255)');
     }
-
-}
-
-function ballHitPaddle (_ball, _paddle) {
-
-    var diff = 0;
-
-    if (_ball.x < _paddle.x)
+    else if (loser)
     {
-        //  Ball is on the left-hand side of the paddle
-        diff = _paddle.x - _ball.x;
-        _ball.body.velocity.x = (-10 * diff);
-    }
-    else if (_ball.x > _paddle.x)
-    {
-        //  Ball is on the right-hand side of the paddle
-        diff = _ball.x -_paddle.x;
-        _ball.body.velocity.x = (10 * diff);
-    }
-    else
-    {
-        //  Ball is perfectly in the middle
-        //  Add a little random X to stop it bouncing straight up!
-        _ball.body.velocity.x = 2 + Math.random() * 8;
+        game.debug.text('You Lose!', 360, 32, 'rgb(0,0,255)');
     }
 
 }
